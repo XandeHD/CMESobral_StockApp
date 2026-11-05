@@ -383,7 +383,7 @@
 
   async function carregarHistorico() {
     try {
-      ultimoHistorico = await api('listarMovimentos', { limite: 300, tipo: estado.histFiltro, email: estado.histEmail });
+      ultimoHistorico = await api('listarMovimentos', { limite: 50, tipo: estado.histFiltro, email: estado.histEmail });
       $('hist-lista').innerHTML = ultimoHistorico.length ? ultimoHistorico.map(linhaMovimento).join('') : '<p class="vazio">Sem movimentos.</p>';
       if (!isMaster()) $('hist-lista').insertAdjacentHTML('beforeend', '<p class="item-sub" style="text-align:center">Mostra os últimos 10. O histórico completo é visto pelo Master.</p>');
     } catch (e) {

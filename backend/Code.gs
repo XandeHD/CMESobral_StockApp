@@ -179,7 +179,9 @@ function guardarArtigo_(p, user) {
             'Correção de contagem', 'Ajuste feito na ficha do artigo', user.email, 'ajuste');
         }
       }
-      return artigoOut_(ler_('Artigos').find((a) => a.id === p.id));
+      const qtdFinal = (p.quantidade !== undefined && p.quantidade !== null && p.quantidade !== '')
+        ? numPositivo_(p.quantidade, 'A quantidade', true) : atual.quantidade;
+      return artigoOut_(Object.assign({}, atual, dados, { quantidade: qtdFinal }));
     }
     const existe = ler_('Artigos').find((a) => bool_(a.ativo) && norm_(a.nome) === norm_(nome));
     if (existe) throw erro_('Já existe um artigo com esse nome.', 409);
@@ -187,7 +189,7 @@ function guardarArtigo_(p, user) {
     acrescentar_('Artigos', novo);
     const inicial = num_(p.quantidade);
     if (inicial > 0) aplicarMovimento_(novo.id, 'ENTRADA', inicial, 'Stock inicial', '', user.email, 'ajuste');
-    return artigoOut_(ler_('Artigos').find((a) => a.id === novo.id));
+    return artigoOut_(Object.assign({}, novo, { quantidade: inicial > 0 ? inicial : 0 }));
   });
 }
 
@@ -220,7 +222,9 @@ function aplicarMovimento_(artigoId, tipo, qtd, motivo, nota, email, origem) {
 function listarMovimentos_(p, user) {
   let lim = Math.min(Math.max(parseInt(p.limite, 10) || 50, 1), 500);
   if (user.cargo !== CARGOS.MASTER) lim = Math.min(lim, 10);
-  let rows = ler_('Movimentos');
+  const filtrado = !!(p.tipo || p.email || p.artigoId);
+  // Lê só as últimas linhas: 50 no máximo (100 se houver filtros, para ainda sobrar resultado).
+  let rows = lerUltimas_('Movimentos', filtrado ? 100 : Math.min(lim, 50));
   if (p.tipo === 'ENTRADA' || p.tipo === 'BAIXA') rows = rows.filter((m) => m.tipo === p.tipo);
   if (p.email) rows = rows.filter((m) => String(m.email).toLowerCase() === String(p.email).toLowerCase());
   if (p.artigoId) rows = rows.filter((m) => m.artigoId === p.artigoId);
@@ -667,6 +671,21 @@ function ler_(nome) {
   return objs.map((r) => Object.assign({}, r));
 }
 
+/** Lê só as últimas n linhas (mais leve que ler o separador todo). Ordem cronológica. */
+function lerUltimas_(nome, n) {
+  const sh = folha_(nome);
+  const cols = TABS[nome];
+  const total = sh.getLastRow() - 1;
+  if (total <= 0) return [];
+  const qtd = Math.min(total, n);
+  const linhas = sh.getRange(total - qtd + 2, 1, qtd, cols.length).getValues();
+  return linhas.filter((l) => l[0] !== '').map((l) => {
+    const o = {};
+    cols.forEach((c, i) => { o[c] = l[i]; });
+    return o;
+  });
+}
+
 function acrescentar_(nome, obj) {
   const cols = TABS[nome];
   folha_(nome).appendRow(cols.map((c) => celula_(obj[c])));
@@ -684,10 +703,13 @@ function atualizar_(nome, chave, valor, patch) {
   const pos = chaves.findIndex((r) => String(r[0]).toLowerCase() === alvo);
   if (pos < 0) throw erro_('Registo não encontrado.', 404);
   const linha = pos + 2;
+  const intervalo = sh.getRange(linha, 1, 1, cols.length);
+  const valores = intervalo.getValues();
   Object.keys(patch).forEach((c) => {
     const col = cols.indexOf(c);
-    if (col >= 0) sh.getRange(linha, col + 1).setValue(celula_(patch[c]));
+    if (col >= 0) valores[0][col] = celula_(patch[c]);
   });
+  intervalo.setValues(valores);
   delete DADOS_CACHE_[nome];
 }
 
