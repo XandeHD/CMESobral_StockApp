@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#10403B">
+<title>Fazer um pedido · Catedral da Esperança</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topo">
+    <p class="marca">CATEDRAL ●●○ DA ESPERANÇA</p>
+    <h1>Fazer um pedido</h1>
+    <p>Viste que falta alguma coisa ou tens uma ideia? Diz-nos aqui, de forma anónima.</p>
+    <div class="segmento" role="group" aria-label="Tipo de pedido" id="tipo">
+      <button type="button" data-tipo="FALTA" aria-pressed="true">Falta um artigo</button>
+      <button type="button" data-tipo="IDEIA" aria-pressed="false">Sugerir algo novo</button>
+    </div>
+  </header>
+
+  <main class="conteudo" id="formulario">
+    <form id="form-pedido" novalidate>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div id="bloco-falta" style="display:flex;flex-direction:column;gap:16px">
+          <label class="campo">O que está a faltar?
+            <input type="text" id="artigo" list="lista-artigos" maxlength="80" placeholder="Ex.: Guardanapos" autocomplete="off">
+            <datalist id="lista-artigos"></datalist>
+          </label>
+          <div class="campo">
+            <span id="nivel-label">Como está?</span>
+            <div class="opcoes" role="group" aria-labelledby="nivel-label" id="nivel">
+              <button type="button" data-nivel="ACABOU" aria-pressed="true">Acabou</button>
+              <button type="button" data-nivel="A_ACABAR" aria-pressed="false">Está a acabar</button>
+              <button type="button" data-nivel="URGENTE" aria-pressed="false">Urgente</button>
+            </div>
+          </div>
+          <label class="campo">Nota (opcional)
+            <input type="text" id="nota" maxlength="200" placeholder="Ex.: Precisamos para domingo">
+          </label>
+        </div>
+
+        <div id="bloco-ideia" hidden style="display:flex;flex-direction:column;gap:16px">
+          <label class="campo">O que sugeres comprar?
+            <input type="text" id="texto" maxlength="120" placeholder="Ex.: Talheres de madeira">
+          </label>
+          <label class="campo">Porquê?
+            <textarea id="porque" maxlength="400" rows="3" placeholder="Ex.: Menos plástico nos lanches"></textarea>
+          </label>
+          <label class="campo">Link ou loja (opcional)
+            <input type="url" id="link" maxlength="300" placeholder="https://…" inputmode="url">
+          </label>
+        </div>
+
+        <div class="honeypot" aria-hidden="true">
+          <label>Website <input type="text" id="website" tabindex="-1" autocomplete="off"></label>
+        </div>
+
+        <div class="autor-aviso">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+          <span>Pedido anónimo: não guardamos nome nem conta.</span>
+        </div>
+
+        <button class="btn bloco" type="submit" id="enviar">Enviar pedido</button>
+      </div>
+    </form>
+  </main>
+
+  <main class="sucesso" id="obrigado" hidden>
+    <div class="icone" aria-hidden="true">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+    </div>
+    <h2>Obrigado!</h2>
+    <p>O teu pedido foi enviado. A equipa vai rever e, se for aprovado, entra na lista de compras.</p>
+    <button class="btn secundario" type="button" id="outro">Fazer outro pedido</button>
+  </main>
+
+  <p class="rodape-publico">Sem conta e sem login · aberto a quem ler o QR</p>
+</div>
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script src="pedido.js"></script>
+</body>
+</html>

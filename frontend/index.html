@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#10403B">
+<title>Stock · Catedral da Esperança</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Ecrã de entrada -->
+<section class="login" id="ecra-login" hidden>
+  <div class="circulo" style="right:-120px;top:-80px;width:340px;height:340px"></div>
+  <div class="circulo" style="right:-60px;top:-20px;width:220px;height:220px"></div>
+  <p class="marca">CATEDRAL ●●○ DA ESPERANÇA</p>
+  <p style="margin:6px 0 0;font-size:12px;letter-spacing:1px;color:#BFBFBF">SOBRAL DE MONTE AGRAÇO</p>
+  <div class="meio">
+    <h1>Stock<br>da Igreja</h1>
+    <p class="sub">Entradas, baixas, faturas e lista de compras num só sítio.</p>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div class="erro-login" id="erro-login" role="alert" hidden></div>
+    <div id="botao-google"></div>
+    <p class="nota">Só emails autorizados pelo Master podem entrar.</p>
+  </div>
+</section>
+
+<!-- App -->
+<div class="app" id="ecra-app" hidden>
+  <header class="topo" id="topo"></header>
+  <main class="conteudo" id="conteudo" tabindex="-1"></main>
+  <nav class="nav" id="nav" aria-label="Navegação"></nav>
+</div>
+
+<dialog id="dialogo"></dialog>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="vendor/qrcode.js"></script>
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
