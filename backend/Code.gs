@@ -9,6 +9,7 @@
  *   ANTHROPIC_API_KEY   (opcional) chave da API da Claude para ler faturas
  *   ANTHROPIC_MODEL     (opcional) modelo a usar; por defeito claude-sonnet-5-5
  *   FATURAS_FOLDER_ID   (opcional) pasta do Drive onde guardar as faturas carregadas
+ *   APP_URL             (opcional) endereço da app (GitHub Pages); vai nos emails de aviso
  */
 
 // ---------------------------------------------------------------------------
@@ -20,7 +21,8 @@ const TABS = {
   Faturas: ['id', 'criadaEm', 'criadaPor', 'fornecedor', 'numero', 'dataFatura', 'estado', 'linhas', 'ficheiroUrl', 'decididaPor', 'decididaEm'],
   Recomendacoes: ['id', 'criadaEm', 'criadaPor', 'origem', 'artigoId', 'titulo', 'detalhe', 'estado', 'feitaPor', 'feitaEm'],
   Pedidos: ['id', 'criadoEm', 'tipo', 'artigo', 'nivel', 'texto', 'porque', 'link', 'estado', 'decididoPor', 'decididoEm'],
-  Utilizadores: ['email', 'cargo', 'ativo', 'criadoEm', 'criadoPor']
+  Utilizadores: ['email', 'cargo', 'ativo', 'criadoEm', 'criadoPor'],
+  Eventos: ['id', 'nome', 'data', 'local', 'notas', 'itens', 'avisoDias', 'avisoPara', 'aviso1Em', 'aviso2Em', 'ultimoAviso', 'consumoEm', 'consumoPor', 'estado', 'criadoEm', 'criadoPor']
 };
 
 const CARGOS = { MASTER: 'MASTER', OPERADOR: 'OPERADOR' };
@@ -79,8 +81,13 @@ const ACTIONS = {
   listarMovimentos: { fn: listarMovimentos_ },
   listarRecomendacoes: { fn: listarRecomendacoes_ },
   marcarRecomendacao: { fn: marcarRecomendacao_ },
+  listarEventos: { fn: listarEventos_ },
 
   guardarArtigo: { fn: guardarArtigo_, role: CARGOS.MASTER },
+  guardarEvento: { fn: guardarEvento_, role: CARGOS.MASTER },
+  apagarEvento: { fn: apagarEvento_, role: CARGOS.MASTER },
+  registarConsumoEvento: { fn: registarConsumoEvento_, role: CARGOS.MASTER },
+  enviarAvisoEvento: { fn: enviarAvisoAgora_, role: CARGOS.MASTER },
   criarRecomendacao: { fn: criarRecomendacao_, role: CARGOS.MASTER },
   arquivarRecomendacao: { fn: arquivarRecomendacao_, role: CARGOS.MASTER },
   listarPedidos: { fn: listarPedidos_, role: CARGOS.MASTER },
@@ -274,6 +281,7 @@ function sincronizarAuto_() {
       atualizar_('Recomendacoes', 'id', aberta.id, { estado: 'RESOLVIDA', feitaPor: 'automático (stock reposto)', feitaEm: new Date() });
     }
   });
+  sincronizarEventos_();
 }
 
 function marcarRecomendacao_(p, user) {
@@ -789,4 +797,267 @@ function iso_(d) {
   if (!d) return '';
   const dt = d instanceof Date ? d : new Date(d);
   return isNaN(dt.getTime()) ? '' : dt.toISOString();
+}
+
+// ---------------------------------------------------------------------------
+// Agenda: eventos, artigos por evento e avisos por email
+// ---------------------------------------------------------------------------
+const AVISO_DIAS = [0, 1, 3, 7];
+
+function itensEvento_(ev) {
+  try {
+    const v = JSON.parse(ev.itens || '[]');
+    return Array.isArray(v) ? v : [];
+  } catch (e) { return []; }
+}
+
+/** Dias de calendário entre hoje e a data do evento (negativo = já passou), no fuso do script. */
+function diasAte_(data, agora) {
+  const tz = Session.getScriptTimeZone();
+  const a = Utilities.formatDate(agora || new Date(), tz, 'yyyy-MM-dd');
+  const b = Utilities.formatDate(new Date(data), tz, 'yyyy-MM-dd');
+  return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+}
+
+function eventoOut_(ev, artigos) {
+  const porId = {};
+  artigos.forEach((a) => { porId[a.id] = a; });
+  const itens = itensEvento_(ev).map((i) => {
+    const a = porId[i.artigoId];
+    const q = num_(i.quantidade);
+    const stock = a ? num_(a.quantidade) : 0;
+    return {
+      artigoId: i.artigoId, nome: a ? String(a.nome) : '(artigo removido)', unidade: a ? String(a.unidade || 'un') : 'un',
+      quantidade: q, stock: stock, falta: arred_(Math.max(0, q - stock))
+    };
+  });
+  return {
+    id: ev.id, nome: String(ev.nome), data: iso_(ev.data), diasAte: diasAte_(ev.data),
+    local: String(ev.local || ''), notas: String(ev.notas || ''), itens: itens,
+    faltam: itens.filter((i) => i.falta > 0).length,
+    avisoDias: num_(ev.avisoDias), avisoPara: ev.avisoPara === 'MASTERS' ? 'MASTERS' : 'EQUIPA',
+    ultimoAviso: iso_(ev.ultimoAviso),
+    consumoRegistado: !!ev.consumoEm, consumoEm: iso_(ev.consumoEm), consumoPor: String(ev.consumoPor || '')
+  };
+}
+
+function listarEventos_() {
+  const artigos = ler_('Artigos');
+  const limite = Date.now() - 60 * 24 * 3600 * 1000;
+  return ler_('Eventos')
+    .filter((e) => e.estado === 'ATIVO' && new Date(e.data).getTime() > limite)
+    .map((e) => eventoOut_(e, artigos))
+    .sort((a, b) => (a.data < b.data ? -1 : 1));
+}
+
+function guardarEvento_(p, user) {
+  const nome = texto_(p.nome, 80, true, 'O nome do evento');
+  const data = new Date(p.data);
+  if (!p.data || isNaN(data.getTime())) throw erro_('Indica a data e a hora do evento.', 400);
+  const artigos = ler_('Artigos').filter((a) => bool_(a.ativo));
+  const juntos = {};
+  (Array.isArray(p.itens) ? p.itens : []).slice(0, 60).forEach((i) => {
+    const id = String(i.artigoId || '');
+    if (!id) return;
+    if (!artigos.some((a) => a.id === id)) throw erro_('Um dos artigos já não existe.', 404);
+    const q = numPositivo_(i.quantidade, 'A quantidade');
+    if (q <= 0) throw erro_('A quantidade de cada artigo tem de ser maior que zero.', 400);
+    juntos[id] = arred_((juntos[id] || 0) + q);
+  });
+  const itens = Object.keys(juntos).map((id) => ({ artigoId: id, quantidade: juntos[id] }));
+  const avisoDias = AVISO_DIAS.indexOf(Number(p.avisoDias)) >= 0 ? Number(p.avisoDias) : 3;
+  const dados = {
+    nome: nome, data: data, local: texto_(p.local, 40), notas: texto_(p.notas, 300),
+    itens: JSON.stringify(itens), avisoDias: avisoDias, avisoPara: p.avisoPara === 'MASTERS' ? 'MASTERS' : 'EQUIPA'
+  };
+  return comLock_(() => {
+    let id = p.id;
+    if (id) {
+      const atual = ler_('Eventos').find((e) => e.id === id && e.estado === 'ATIVO');
+      if (!atual) throw erro_('Evento não encontrado.', 404);
+      if (atual.consumoEm) throw erro_('Este evento já tem o consumo registado e não pode ser alterado.', 409);
+      if (new Date(atual.data).getTime() !== data.getTime() || num_(atual.avisoDias) !== avisoDias) {
+        dados.aviso1Em = '';
+        dados.aviso2Em = '';
+      }
+      atualizar_('Eventos', 'id', id, dados);
+    } else {
+      id = id_('E');
+      acrescentar_('Eventos', Object.assign({
+        id: id, aviso1Em: '', aviso2Em: '', ultimoAviso: '', consumoEm: '', consumoPor: '',
+        estado: 'ATIVO', criadoEm: new Date(), criadoPor: user.email
+      }, dados));
+    }
+    sincronizarEventos_();
+    return eventoOut_(ler_('Eventos').find((e) => e.id === id), ler_('Artigos'));
+  });
+}
+
+function apagarEvento_(p) {
+  return comLock_(() => {
+    const ev = ler_('Eventos').find((e) => e.id === p.id && e.estado === 'ATIVO');
+    if (!ev) throw erro_('Evento não encontrado.', 404);
+    atualizar_('Eventos', 'id', ev.id, { estado: 'CANCELADO' });
+    sincronizarEventos_();
+    return { id: ev.id };
+  });
+}
+
+/** Baixa dos artigos realmente usados no evento. Cada baixa fica em nome de quem a registou. */
+function registarConsumoEvento_(p, user) {
+  return comLock_(() => {
+    const ev = ler_('Eventos').find((e) => e.id === p.id && e.estado === 'ATIVO');
+    if (!ev) throw erro_('Evento não encontrado.', 404);
+    if (ev.consumoEm) throw erro_('O consumo deste evento já foi registado.', 409);
+    const permitidos = {};
+    itensEvento_(ev).forEach((i) => { permitidos[i.artigoId] = true; });
+    const reais = {};
+    (Array.isArray(p.consumos) ? p.consumos : []).forEach((c) => {
+      const id = String(c.artigoId || '');
+      const q = numPositivo_(c.quantidade, 'A quantidade', true);
+      if (permitidos[id] && q > 0) reais[id] = arred_((reais[id] || 0) + q);
+    });
+    const artigos = ler_('Artigos');
+    Object.keys(reais).forEach((id) => {
+      const a = artigos.find((x) => x.id === id && bool_(x.ativo));
+      if (!a) throw erro_('Artigo não encontrado.', 404);
+      if (num_(a.quantidade) < reais[id]) {
+        throw erro_('Stock insuficiente: só há ' + num_(a.quantidade) + ' ' + (a.unidade || 'un') + ' de ' + a.nome + '.', 409);
+      }
+    });
+    const nota = ('Evento: ' + ev.nome).slice(0, 200);
+    Object.keys(reais).forEach((id) => aplicarMovimento_(id, 'BAIXA', reais[id], 'Consumo', nota, user.email, 'evento'));
+    atualizar_('Eventos', 'id', ev.id, { consumoEm: new Date(), consumoPor: user.email });
+    sincronizarEventos_();
+    return { baixas: Object.keys(reais).length };
+  });
+}
+
+/** Mantém na lista de Compras o que falta para os próximos eventos (e fecha o que já não falta). */
+function sincronizarEventos_() {
+  const desde = Date.now() - 6 * 3600 * 1000;
+  const artigos = ler_('Artigos');
+  const porId = {};
+  artigos.forEach((a) => { porId[a.id] = a; });
+  const tz = Session.getScriptTimeZone();
+  const precisas = {};
+  ler_('Eventos')
+    .filter((e) => e.estado === 'ATIVO' && !e.consumoEm && new Date(e.data).getTime() >= desde)
+    .forEach((ev) => {
+      itensEvento_(ev).forEach((i) => {
+        const a = porId[i.artigoId];
+        if (!a || !bool_(a.ativo)) return;
+        const falta = arred_(num_(i.quantidade) - num_(a.quantidade));
+        if (falta <= 0) return;
+        const titulo = ('Comprar ' + a.nome + ' (' + ev.nome + ')').slice(0, 120);
+        precisas[titulo] = {
+          artigoId: a.id,
+          detalhe: 'Faltam ' + falta + ' ' + (a.unidade || 'un') + ' · ' + Utilities.formatDate(new Date(ev.data), tz, 'dd/MM HH:mm')
+        };
+      });
+    });
+  const recs = ler_('Recomendacoes').filter((r) => r.origem === 'EVENTO' && (r.estado === 'ABERTA' || r.estado === 'FEITA'));
+  Object.keys(precisas).forEach((titulo) => {
+    if (recs.some((r) => r.titulo === titulo)) return;
+    acrescentar_('Recomendacoes', {
+      id: id_('R'), criadaEm: new Date(), criadaPor: 'automático', origem: 'EVENTO', artigoId: precisas[titulo].artigoId,
+      titulo: titulo, detalhe: precisas[titulo].detalhe, estado: 'ABERTA', feitaPor: '', feitaEm: ''
+    });
+  });
+  recs.filter((r) => r.estado === 'ABERTA' && !precisas[r.titulo]).forEach((r) => {
+    atualizar_('Recomendacoes', 'id', r.id, { estado: 'RESOLVIDA', feitaPor: 'automático (evento)', feitaEm: new Date() });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Avisos por email
+// ---------------------------------------------------------------------------
+function htmlEsc_(s) {
+  return String(s === undefined || s === null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function destinatarios_(para) {
+  return listarUtilizadores_()
+    .filter((u) => para === 'MASTERS' ? u.cargo === CARGOS.MASTER : true)
+    .map((u) => u.email)
+    .filter((e) => /^[^\s@]+@[^\s@]+$/.test(e));
+}
+
+/** Envia o aviso de um evento. Devolve quantas pessoas receberam. */
+function enviarAvisoEvento_(ev, artigos) {
+  const out = eventoOut_(ev, artigos);
+  const dests = destinatarios_(out.avisoPara);
+  if (!dests.length) return 0;
+  const tz = Session.getScriptTimeZone();
+  const quandoTxt = Utilities.formatDate(new Date(ev.data), tz, "dd/MM/yyyy 'às' HH:mm");
+  const assunto = (out.faltam ? '⚠ Faltam ' + out.faltam + ' artigo(s) para ' : 'Artigos para ') + out.nome + ' (' + Utilities.formatDate(new Date(ev.data), tz, 'dd/MM') + ')';
+  const linhasTxt = out.itens.map((i) =>
+    '- ' + i.nome + ': precisa de ' + i.quantidade + ' ' + i.unidade + ', em stock ' + i.stock + (i.falta > 0 ? '  → FALTAM ' + i.falta : '  ✓')).join('\n');
+  const appUrl = cfg_('APP_URL', true);
+  const corpo = out.nome + '\n' + quandoTxt + (out.local ? ' · ' + out.local : '') + '\n\n' +
+    (out.itens.length ? linhasTxt : 'Sem artigos associados a este evento.') + '\n\n' +
+    (out.faltam ? 'O que falta já está na lista de Compras.' : 'Tudo em stock para este evento.') + (appUrl ? '\n\n' + appUrl : '');
+  const td = 'padding:6px 10px;border-bottom:1px solid #E1E8E7';
+  const linhasHtml = out.itens.map((i) =>
+    '<tr><td style="' + td + '">' + htmlEsc_(i.nome) + '</td>' +
+    '<td style="' + td + ';text-align:right">' + i.quantidade + ' ' + htmlEsc_(i.unidade) + '</td>' +
+    '<td style="' + td + ';text-align:right">' + i.stock + '</td>' +
+    '<td style="' + td + ';text-align:right;font-weight:bold;color:' + (i.falta > 0 ? '#8A2A1C' : '#127369') + '">' + (i.falta > 0 ? 'Faltam ' + i.falta : 'OK') + '</td></tr>').join('');
+  const th = 'padding:6px 10px;text-align:';
+  const html = '<div style="font-family:Arial,sans-serif;color:#10403B;max-width:560px">' +
+    '<h2 style="margin:0 0 4px">' + htmlEsc_(out.nome) + '</h2>' +
+    '<p style="margin:0 0 16px;color:#4C5958">' + htmlEsc_(quandoTxt) + (out.local ? ' · ' + htmlEsc_(out.local) : '') + '</p>' +
+    (out.itens.length
+      ? '<table style="border-collapse:collapse;width:100%;font-size:14px"><tr style="background:#E0F5F2"><th style="' + th + 'left">Artigo</th><th style="' + th + 'right">Precisa</th><th style="' + th + 'right">Stock</th><th style="' + th + 'right">Estado</th></tr>' + linhasHtml + '</table>'
+      : '<p>Sem artigos associados a este evento.</p>') +
+    '<p style="margin:16px 0 0;font-weight:bold;color:' + (out.faltam ? '#8A2A1C' : '#127369') + '">' +
+    (out.faltam ? 'O que falta já está na lista de Compras.' : 'Tudo em stock para este evento.') + '</p>' +
+    (appUrl ? '<p><a href="' + htmlEsc_(appUrl) + '">Abrir a app</a></p>' : '') + '</div>';
+  dests.forEach((to) => MailApp.sendEmail({ to: to, subject: assunto, body: corpo, htmlBody: html, name: 'Stock · Catedral da Esperança' }));
+  return dests.length;
+}
+
+function enviarAvisoAgora_(p) {
+  return comLock_(() => {
+    const ev = ler_('Eventos').find((e) => e.id === p.id && e.estado === 'ATIVO');
+    if (!ev) throw erro_('Evento não encontrado.', 404);
+    const n = enviarAvisoEvento_(ev, ler_('Artigos'));
+    if (!n) throw erro_('Não há ninguém para receber o aviso.', 400);
+    const agora = new Date();
+    atualizar_('Eventos', 'id', ev.id, { ultimoAviso: agora });
+    return { enviados: n, ultimoAviso: agora.toISOString() };
+  });
+}
+
+/** Corre todos os dias (ver instalarAvisos). 1.º aviso X dias antes; 2.º na véspera, só se ainda faltar algo. */
+function avisosDiarios() {
+  comLock_(() => {
+    const agora = new Date();
+    const tz = Session.getScriptTimeZone();
+    const hoje = Utilities.formatDate(agora, tz, 'yyyyMMdd');
+    const artigos = ler_('Artigos');
+    ler_('Eventos').filter((e) => e.estado === 'ATIVO' && !e.consumoEm).forEach((ev) => {
+      try {
+        const aviso = num_(ev.avisoDias);
+        const dias = diasAte_(ev.data, agora);
+        if (!aviso || dias < 0) return;
+        if (!ev.aviso1Em && dias <= aviso) {
+          if (enviarAvisoEvento_(ev, artigos)) atualizar_('Eventos', 'id', ev.id, { aviso1Em: agora, ultimoAviso: agora });
+        } else if (aviso > 1 && dias === 1 && !ev.aviso2Em && ev.aviso1Em &&
+          Utilities.formatDate(new Date(ev.aviso1Em), tz, 'yyyyMMdd') < hoje &&
+          eventoOut_(ev, artigos).faltam > 0) {
+          if (enviarAvisoEvento_(ev, artigos)) atualizar_('Eventos', 'id', ev.id, { aviso2Em: agora, ultimoAviso: agora });
+        }
+      } catch (err) {
+        console.error('avisosDiarios', ev.id, err && err.stack ? err.stack : err);
+      }
+    });
+  });
+}
+
+/** Correr UMA vez no editor (▶ instalarAvisos): pede a permissão de email e agenda o envio diário às 8h. */
+function instalarAvisos() {
+  ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === 'avisosDiarios').forEach((t) => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('avisosDiarios').timeBased().everyDays(1).atHour(8).create();
+  console.log('Avisos diários agendados (cerca das 8h). Emails que ainda podes enviar hoje: ' + MailApp.getRemainingDailyQuota());
 }

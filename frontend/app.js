@@ -8,6 +8,7 @@
     token: null,
     me: null,
     artigos: [],
+    eventos: [],
     movTipo: 'ENTRADA',
     movArtigoId: '',
     histFiltro: '',
@@ -28,8 +29,14 @@
     pessoa: svg('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>', 16),
     lupa: svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>', 18),
     camara: svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>', 20),
-    voltar: svg('<path d="M15 5l-7 7 7 7"/>')
+    voltar: svg('<path d="M15 5l-7 7 7 7"/>'),
+    agenda: svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
+    email: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>', 18),
+    lixo: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', 18)
   };
+
+  // As faturas ficam escondidas por agora (o código mantém-se). Mudar para true para as voltar a mostrar.
+  const FATURAS_ATIVAS = false;
 
   // -------------------------------------------------------------------------
   // Sessão
@@ -140,7 +147,8 @@
     const itens = [
       ['stock', 'Stock', IC.stock, true],
       ['movimento', 'Movimentos', IC.mov, true],
-      ['faturas', 'Faturas', IC.fatura, isMaster()],
+      ['agenda', 'Agenda', IC.agenda, true],
+      ['faturas', 'Faturas', IC.fatura, FATURAS_ATIVAS && isMaster()],
       ['compras', 'Compras', IC.compras, true],
       ['equipa', 'Equipa', IC.equipa, isMaster()]
     ];
@@ -162,19 +170,23 @@
     stock: ecraStock,
     movimento: ecraMovimento,
     historico: ecraHistorico,
+    agenda: ecraAgenda,
+    evento: ecraEvento,
+    'evento-form': ecraEventoForm,
     faturas: ecraFaturas,
     compras: ecraCompras,
     equipa: ecraEquipa
   };
-  const SO_MASTER = { faturas: true, equipa: true };
+  const SO_MASTER = { faturas: true, equipa: true, 'evento-form': true };
+  const NAV_DE = { historico: 'movimento', evento: 'agenda', 'evento-form': 'agenda' };
 
   function rotear() {
     if (!estado.me) return;
     const partes = (location.hash || '#/stock').replace(/^#\//, '').split('?');
     let rota = partes[0];
     const params = new URLSearchParams(partes[1] || '');
-    if (!ROTAS[rota] || (SO_MASTER[rota] && !isMaster())) rota = 'stock';
-    nav(rota === 'historico' ? 'movimento' : rota);
+    if (!ROTAS[rota] || (SO_MASTER[rota] && !isMaster()) || (rota === 'faturas' && !FATURAS_ATIVAS)) rota = 'stock';
+    nav(NAV_DE[rota] || rota);
     ROTAS[rota](params);
     window.scrollTo(0, 0);
   }
@@ -411,7 +423,218 @@
   }
 
   // -------------------------------------------------------------------------
-  // FATURAS (só Master)
+  // AGENDA (eventos, artigos por evento, aviso por email)
+  // -------------------------------------------------------------------------
+  const dataEv = (iso) => new Date(iso);
+  const horaEv = (iso) => dataEv(iso).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+  const diaSemana = (iso) => dataEv(iso).toLocaleDateString('pt-PT', { weekday: 'short' }).replace('.', '');
+  const mesCurto = (iso) => dataEv(iso).toLocaleDateString('pt-PT', { month: 'short' }).replace('.', '');
+  const txtDias = (n) => (n === 0 ? 'Hoje' : n === 1 ? 'Amanhã' : n > 1 ? 'Daqui a ' + n + ' dias' : 'Há ' + Math.abs(n) + (n === -1 ? ' dia' : ' dias'));
+
+  function subEvento(e) {
+    return [diaSemana(e.data) + ', ' + dataEv(e.data).getDate() + ' ' + mesCurto(e.data) + ' · ' + horaEv(e.data), e.local, txtDias(e.diasAte)].filter(Boolean).join(' · ');
+  }
+
+  async function carregarEventos() {
+    estado.eventos = await api('listarEventos');
+    return estado.eventos;
+  }
+
+  async function ecraAgenda() {
+    topo('Agenda', '<p>Eventos marcados e os artigos que cada um precisa.</p>');
+    carregando();
+    let eventos;
+    try { eventos = await carregarEventos(); } catch (e) { conteudo('<p class="vazio">' + esc(e.message) + '</p>'); return; }
+    const proximos = eventos.filter((e) => e.diasAte >= 0);
+    const passados = eventos.filter((e) => e.diasAte < 0).reverse();
+    let html = isMaster() ? '<a class="btn secundario bloco" href="#/evento-form">+ Novo evento</a>' : '';
+    html += '<h2 class="secao">Próximos</h2>';
+    html += proximos.length ? proximos.map(cartaoEvento).join('') : '<p class="vazio">Sem eventos marcados.' + (isMaster() ? ' Cria o primeiro com "+ Novo evento".' : '') + '</p>';
+    if (passados.length) html += '<h2 class="secao">Passados</h2>' + passados.map(cartaoEvento).join('');
+    conteudo(html);
+  }
+
+  function cartaoEvento(e) {
+    let badge = '';
+    if (e.diasAte >= 0) {
+      if (e.itens.length) badge = e.faltam ? '<span class="badge baixo">Faltam ' + e.faltam + '</span>' : '<span class="badge">Tudo em stock</span>';
+    } else if (e.itens.length) {
+      badge = e.consumoRegistado ? '<span class="badge escuro">Consumo registado</span>' : '<span class="badge baixo">Consumo por registar</span>';
+    }
+    const sub = e.diasAte >= 0 ? subEvento(e) : [diaSemana(e.data) + ' · ' + horaEv(e.data), e.local].filter(Boolean).join(' · ');
+    return '<a class="cartao item" href="#/evento?id=' + encodeURIComponent(e.id) + '" style="text-decoration:none;color:inherit">' +
+      '<span class="dia" aria-hidden="true"><b>' + dataEv(e.data).getDate() + '</b><small>' + esc(mesCurto(e.data).toUpperCase()) + '</small></span>' +
+      '<span class="item-texto"><span class="item-titulo">' + esc(e.nome) + '</span><span class="item-sub">' + esc(sub) + '</span></span>' + badge + '</a>';
+  }
+
+  async function ecraEvento(params) {
+    const id = params.get('id');
+    topo('Evento', '', '#/agenda');
+    carregando();
+    let e = (estado.eventos || []).find((x) => x.id === id);
+    if (!e) {
+      try { e = (await carregarEventos()).find((x) => x.id === id); } catch (err) { conteudo('<p class="vazio">' + esc(err.message) + '</p>'); return; }
+    }
+    if (!e) { conteudo('<p class="vazio">Evento não encontrado.</p>'); return; }
+    topo(e.nome, '<p>' + esc(subEvento(e)) + '</p>', '#/agenda');
+
+    const futuro = e.diasAte >= 0;
+    let html = '';
+    if (futuro && e.itens.length) {
+      html += e.faltam
+        ? '<div class="aviso-falta" role="status">Faltam ' + e.faltam + ' artigo' + (e.faltam > 1 ? 's' : '') + '. Já estão na lista de Compras.</div>'
+        : '<div class="aviso-ok" role="status">Tudo em stock para este evento.</div>';
+    }
+    if (e.notas) html += '<div class="cartao">' + esc(e.notas) + '</div>';
+    html += '<h2 class="secao">Artigos para o evento</h2>';
+    html += e.itens.length ? e.itens.map((i) =>
+      '<div class="cartao item"><span class="item-texto"><span class="item-titulo" style="font-size:14px">' + esc(i.nome) + '</span>' +
+      '<span class="item-sub">Em stock ' + fmt(i.stock) + ' ' + esc(i.unidade) + '</span></span>' +
+      '<span style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span class="item-num">' + fmt(i.quantidade) + ' ' + esc(i.unidade) + '</span>' +
+      (i.falta > 0 ? '<span class="badge baixo">Falta ' + fmt(i.falta) + '</span>' : '<span class="badge">OK</span>') + '</span></div>'
+    ).join('') : '<p class="vazio">Sem artigos neste evento.</p>';
+
+    html += '<div class="cartao item" style="align-items:flex-start"><span style="color:var(--verde);margin-top:2px">' + IC.email + '</span>' +
+      '<span class="item-texto"><span class="item-titulo" style="font-size:14px">Aviso por email</span>' +
+      '<span class="item-sub">' + esc(textoAviso(e)) + '</span>' +
+      (e.ultimoAviso ? '<span class="item-sub">Último enviado: ' + esc(quando(e.ultimoAviso)) + '</span>' : '') + '</span></div>';
+
+    if (e.consumoRegistado) {
+      html += '<div class="aviso-ok" role="status">Consumo registado' + (e.consumoPor ? ' por ' + esc(e.consumoPor) : '') + ' · ' + esc(quando(e.consumoEm)) + '.</div>';
+    }
+    if (isMaster()) {
+      if (!e.consumoRegistado && e.itens.length) html += '<button class="btn bloco" type="button" data-acao="consumo-evento" data-id="' + esc(e.id) + '">Registar consumo do evento</button>';
+      html += '<div class="acoes">' +
+        (e.consumoRegistado ? '' : '<a class="btn secundario" href="#/evento-form?id=' + encodeURIComponent(e.id) + '" style="text-align:center;text-decoration:none">Editar</a>') +
+        '<button class="btn secundario" type="button" data-acao="aviso-agora" data-id="' + esc(e.id) + '">Enviar aviso agora</button></div>';
+    }
+    conteudo(html);
+  }
+
+  function textoAviso(e) {
+    if (!e.avisoDias) return 'Sem aviso por email.';
+    const quem = e.avisoPara === 'MASTERS' ? 'só Masters' : 'toda a equipa';
+    return e.avisoDias + (e.avisoDias === 1 ? ' dia antes' : ' dias antes') + ' · ' + quem +
+      (e.avisoDias > 1 ? ' · na véspera, de novo, se ainda faltar alguma coisa' : '');
+  }
+
+  // --- formulário (criar / editar) -----------------------------------------
+  let itensForm = [];
+
+  async function ecraEventoForm(params) {
+    const id = params.get('id');
+    topo(id ? 'Editar evento' : 'Novo evento', '', id ? '#/evento?id=' + encodeURIComponent(id) : '#/agenda');
+    carregando();
+    let e = null;
+    try {
+      if (!estado.artigos.length) await carregarArtigos();
+      if (id) {
+        e = (estado.eventos || []).find((x) => x.id === id) || (await carregarEventos()).find((x) => x.id === id);
+        if (!e) { conteudo('<p class="vazio">Evento não encontrado.</p>'); return; }
+      }
+    } catch (err) { conteudo('<p class="vazio">' + esc(err.message) + '</p>'); return; }
+
+    const d = e ? dataEv(e.data) : null;
+    const dd = d ? d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') : '';
+    const hh = d ? String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') : '';
+    itensForm = e ? e.itens.map((i) => ({ artigoId: i.artigoId, quantidade: i.quantidade })) : [];
+    const avisoDias = e ? e.avisoDias : 3;
+    const avisoPara = e ? e.avisoPara : 'EQUIPA';
+    const optDias = [[0, 'Sem aviso'], [1, '1 dia antes'], [3, '3 dias antes'], [7, '7 dias antes']]
+      .map((o) => '<option value="' + o[0] + '"' + (o[0] === avisoDias ? ' selected' : '') + '>' + o[1] + '</option>').join('');
+
+    conteudo(
+      '<form id="form-evento" style="display:flex;flex-direction:column;gap:16px">' +
+      '<label class="campo">Nome do evento<input name="nome" required maxlength="80" value="' + esc(e ? e.nome : '') + '"></label>' +
+      '<div class="linha-campos"><label class="campo">Data<input name="data" type="date" required value="' + dd + '"></label>' +
+      '<label class="campo">Hora<input name="hora" type="time" required value="' + hh + '"></label></div>' +
+      '<label class="campo">Local (opcional)<input name="local" maxlength="40" placeholder="Ex.: Salão" value="' + esc(e ? e.local : '') + '"></label>' +
+      '<label class="campo">Notas (opcional)<textarea name="notas" maxlength="300" placeholder="Ex.: 60 pessoas">' + esc(e ? e.notas : '') + '</textarea></label>' +
+      '<h2 class="secao">Artigos necessários</h2>' +
+      '<div id="ev-itens" style="display:flex;flex-direction:column;gap:12px"></div>' +
+      '<button class="btn secundario" type="button" data-acao="ev-add-item">+ Adicionar artigo</button>' +
+      '<h2 class="secao">Aviso por email</h2>' +
+      '<div class="linha-campos"><label class="campo">Quando<select name="avisoDias">' + optDias + '</select></label>' +
+      '<label class="campo">Para quem<select name="avisoPara"><option value="EQUIPA"' + (avisoPara === 'EQUIPA' ? ' selected' : '') + '>Toda a equipa</option>' +
+      '<option value="MASTERS"' + (avisoPara === 'MASTERS' ? ' selected' : '') + '>Só Masters</option></select></label></div>' +
+      '<p class="item-sub" style="margin:0">O email lista os artigos e o que falta. Se ainda faltar alguma coisa na véspera, segue um segundo aviso.</p>' +
+      '<button class="btn bloco" type="submit" id="btn-evento">Guardar evento</button>' +
+      (e ? '<button class="btn-texto" type="button" data-acao="apagar-evento" data-id="' + esc(e.id) + '">Apagar evento</button>' : '') +
+      '</form>'
+    );
+    if (!itensForm.length) itensForm.push({ artigoId: '', quantidade: 1 });
+    desenharItensForm();
+
+    $('form-evento').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      lerItensForm();
+      const f = new FormData(ev.target);
+      const quando = new Date(f.get('data') + 'T' + f.get('hora'));
+      if (isNaN(quando.getTime())) { toast('Indica a data e a hora.', 'erro'); return; }
+      const itens = itensForm.filter((i) => i.artigoId);
+      if (itens.some((i) => !(Number(i.quantidade) > 0))) { toast('Indica a quantidade de cada artigo.', 'erro'); return; }
+      const btn = $('btn-evento');
+      btn.disabled = true;
+      try {
+        const salvo = await api('guardarEvento', {
+          id: e ? e.id : undefined, nome: f.get('nome'), data: quando.toISOString(), local: f.get('local'), notas: f.get('notas'),
+          itens: itens, avisoDias: f.get('avisoDias'), avisoPara: f.get('avisoPara')
+        });
+        estado.eventos = [];
+        toast('Evento guardado.');
+        location.hash = '#/evento?id=' + encodeURIComponent(salvo.id);
+      } catch (err) {
+        toast(err.message, 'erro');
+        btn.disabled = false;
+      }
+    });
+  }
+
+  function desenharItensForm() {
+    const alvo = $('ev-itens');
+    if (!alvo) return;
+    const opcoes = (sel) => '<option value="">— Escolher artigo —</option>' +
+      estado.artigos.map((a) => '<option value="' + esc(a.id) + '"' + (a.id === sel ? ' selected' : '') + '>' + esc(a.nome) + '</option>').join('');
+    alvo.innerHTML = itensForm.map((it, i) =>
+      '<div class="linha-item-ev"><label class="campo">Artigo<select data-ev="artigo" data-i="' + i + '">' + opcoes(it.artigoId) + '</select></label>' +
+      '<label class="campo">Qtd.<input data-ev="qtd" data-i="' + i + '" type="number" min="0" step="any" inputmode="decimal" value="' + esc(it.quantidade) + '"></label>' +
+      '<button class="btn fantasma" type="button" data-acao="ev-del-item" data-i="' + i + '" aria-label="Remover artigo">' + IC.lixo + '</button></div>'
+    ).join('');
+  }
+
+  function lerItensForm() {
+    document.querySelectorAll('#ev-itens [data-ev]').forEach((el) => {
+      const it = itensForm[Number(el.dataset.i)];
+      if (!it) return;
+      if (el.dataset.ev === 'artigo') it.artigoId = el.value; else it.quantidade = el.value;
+    });
+  }
+
+  function dialogoConsumo(e) {
+    abrirDialogo(
+      '<h2>Registar consumo</h2><form id="form-consumo">' +
+      '<p class="item-sub" style="margin:0;font-size:13px">Indica quanto foi realmente usado (0 se não foi usado). Fica registado como baixa em nome de <strong>' + esc(estado.me.email) + '</strong>.</p>' +
+      e.itens.map((i, n) =>
+        '<label class="campo">' + esc(i.nome) + '<span class="item-sub" style="font-weight:400">previsto ' + fmt(i.quantidade) + ' · em stock ' + fmt(i.stock) + ' ' + esc(i.unidade) + '</span>' +
+        '<input name="q' + n + '" type="number" min="0" step="any" inputmode="decimal" value="' + esc(i.quantidade) + '"></label>').join('') +
+      '<div class="acoes"><button class="btn fantasma" type="button" data-acao="fechar">Cancelar</button><button class="btn" type="submit">Dar baixa</button></div></form>'
+    );
+    $('form-consumo').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      const consumos = e.itens.map((i, n) => ({ artigoId: i.artigoId, quantidade: f.get('q' + n) }));
+      try {
+        const r = await api('registarConsumoEvento', { id: e.id, consumos: consumos });
+        fecharDialogo();
+        await carregarArtigos();
+        toast('Consumo registado: ' + r.baixas + ' baixa(s).');
+        ecraEvento(new URLSearchParams('id=' + encodeURIComponent(e.id)));
+      } catch (err) { toast(err.message, 'erro'); }
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // FATURAS (só Master) — escondidas por agora (FATURAS_ATIVAS)
   // -------------------------------------------------------------------------
   async function ecraFaturas() {
     topo('Faturas',
@@ -664,7 +887,7 @@
   }
 
   function cartaoRec(r) {
-    const origens = { AUTO: 'Automático', MANUAL: 'Master', PEDIDO: 'Pedido aprovado' };
+    const origens = { AUTO: 'Automático', MANUAL: 'Master', PEDIDO: 'Pedido aprovado', EVENTO: 'Para um evento' };
     return '<div class="cartao">' +
       '<label class="rec' + (r.feita ? ' feita' : '') + '"><input type="checkbox" data-acao="marcar-rec" data-id="' + esc(r.id) + '"' + (r.feita ? ' checked' : '') + '>' +
       '<span class="item-texto"><span class="item-titulo" style="font-size:14px">' + esc(r.titulo) + '</span>' +
@@ -871,6 +1094,33 @@
           await api('descartarFatura', { id: estado.faturaAberta.id });
           estado.faturaAberta = null; toast('Fatura descartada.'); ecraFaturas();
           break;
+        case 'ev-add-item': lerItensForm(); itensForm.push({ artigoId: '', quantidade: 1 }); desenharItensForm(); break;
+        case 'ev-del-item':
+          lerItensForm();
+          itensForm.splice(Number(el.dataset.i), 1);
+          if (!itensForm.length) itensForm.push({ artigoId: '', quantidade: 1 });
+          desenharItensForm();
+          break;
+        case 'apagar-evento':
+          if (!confirm('Apagar este evento? Os avisos deixam de ser enviados.')) break;
+          await api('apagarEvento', { id: el.dataset.id });
+          estado.eventos = [];
+          toast('Evento apagado.');
+          location.hash = '#/agenda';
+          break;
+        case 'consumo-evento': {
+          const ev = (estado.eventos || []).find((x) => x.id === el.dataset.id);
+          if (ev) dialogoConsumo(ev);
+          break;
+        }
+        case 'aviso-agora': {
+          if (!confirm('Enviar agora o aviso por email deste evento?')) break;
+          el.disabled = true;
+          const r = await api('enviarAvisoEvento', { id: el.dataset.id });
+          toast('Aviso enviado para ' + r.enviados + ' pessoa(s).');
+          ecraEvento(new URLSearchParams('id=' + encodeURIComponent(el.dataset.id)));
+          break;
+        }
         case 'nova-rec': dialogoNovaRec(); break;
         case 'arquivar-rec':
           await api('arquivarRecomendacao', { id: el.dataset.id }); toast('Arquivada.'); ecraCompras();

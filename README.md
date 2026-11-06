@@ -53,6 +53,7 @@ No Apps Script: **Definições do projeto → Propriedades do script → Adicion
 | `ANTHROPIC_API_KEY` | (opcional) chave da API da Claude, de <https://console.anthropic.com> |
 | `ANTHROPIC_MODEL` | (opcional) por defeito `claude-sonnet-5-5` |
 | `FATURAS_FOLDER_ID` | (opcional) ID de uma pasta do Drive para guardar cópia das faturas |
+| `APP_URL` | (opcional) endereço da app, usado no link dos emails de aviso |
 
 `SHEET_ID` já foi preenchido pelo `setup`.
 
@@ -86,6 +87,21 @@ No Apps Script: **Definições do projeto → Propriedades do script → Adicion
 - **Compras**: lista automática dos artigos abaixo do mínimo + recomendações do Master + pedidos aprovados. Quem compra marca a checkbox (fica o email e a hora).
 - **Pedidos anónimos**: chegam a Compras → "Pedidos por aprovar".
 - **Histórico**: Movimentos → Ver histórico. O Master filtra por pessoa e exporta para Excel.
+
+## Agenda de eventos (novo)
+- **Agenda** (para todos verem, só o Master cria): marca eventos com data, hora, local e notas, e junta os **artigos e quantidades** de que cada evento precisa.
+- Cada evento mostra o que **falta** (necessário − stock atual). O que falta entra sozinho na lista de **Compras** ("Para um evento") e sai quando o stock for reposto.
+- **Aviso por email**: 1, 3 ou 7 dias antes, para toda a equipa ou só Masters. O email lista os artigos, o stock e o que falta. Na véspera, se ainda faltar algo, segue um segundo aviso. O botão **Enviar aviso agora** envia na hora.
+- **Registar consumo do evento**: depois do evento, o Master indica o que foi realmente usado e fica registado como baixa em nome dele (uma só vez por evento).
+- As **Faturas** estão escondidas por agora (`FATURAS_ATIVAS = false` no `frontend/app.js`); o código mantém-se.
+
+### Ativar os emails (uma vez)
+1. Cola o novo `backend/Code.gs` e o `backend/appsscript.json` no Apps Script (o manifesto ganhou as permissões de email e de agendamento).
+2. Escolhe a função **`instalarAvisos`** e carrega em **Executar**. Aceita as permissões. Isto agenda o envio diário (por volta das 8h).
+3. **Implementar → Gerir implementações → ✏️ → Versão: Nova versão** (o URL não muda).
+4. (Opcional) Propriedade do script `APP_URL` com o endereço da app, para o email ter o link.
+
+> O Gmail grátis permite cerca de 100 emails por dia a partir de scripts, mais do que suficiente para esta equipa.
 
 ## Proteções da página pública
 - Só cria pedidos; não mostra stock nem histórico (apenas os nomes dos artigos para sugestão).
