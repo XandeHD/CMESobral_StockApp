@@ -995,6 +995,7 @@ function enviarAvisoEvento_(ev, artigos) {
     '- ' + i.nome + ': precisa de ' + i.quantidade + ' ' + i.unidade + ', em stock ' + i.stock + (i.falta > 0 ? '  → FALTAM ' + i.falta : '  ✓')).join('\n');
   const appUrl = cfg_('APP_URL', true);
   const corpo = out.nome + '\n' + quandoTxt + (out.local ? ' · ' + out.local : '') + '\n\n' +
+    (out.notas ? 'Descrição: ' + out.notas + '\n\n' : '') +
     (out.itens.length ? linhasTxt : 'Sem artigos associados a este evento.') + '\n\n' +
     (out.faltam ? 'O que falta já está na lista de Compras.' : 'Tudo em stock para este evento.') + (appUrl ? '\n\n' + appUrl : '');
   const td = 'padding:6px 10px;border-bottom:1px solid #E1E8E7';
@@ -1007,6 +1008,7 @@ function enviarAvisoEvento_(ev, artigos) {
   const html = '<div style="font-family:Arial,sans-serif;color:#10403B;max-width:560px">' +
     '<h2 style="margin:0 0 4px">' + htmlEsc_(out.nome) + '</h2>' +
     '<p style="margin:0 0 16px;color:#4C5958">' + htmlEsc_(quandoTxt) + (out.local ? ' · ' + htmlEsc_(out.local) : '') + '</p>' +
+    (out.notas ? '<p style="margin:0 0 16px;padding:10px 12px;background:#F3F6F5;border-radius:8px;white-space:pre-line"><strong>Descrição:</strong> ' + htmlEsc_(out.notas) + '</p>' : '') +
     (out.itens.length
       ? '<table style="border-collapse:collapse;width:100%;font-size:14px"><tr style="background:#E0F5F2"><th style="' + th + 'left">Artigo</th><th style="' + th + 'right">Precisa</th><th style="' + th + 'right">Stock</th><th style="' + th + 'right">Estado</th></tr>' + linhasHtml + '</table>'
       : '<p>Sem artigos associados a este evento.</p>') +

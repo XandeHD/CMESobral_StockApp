@@ -549,7 +549,7 @@
       '<div class="linha-campos"><label class="campo">Data<input name="data" type="date" required value="' + dd + '"></label>' +
       '<label class="campo">Hora<input name="hora" type="time" required value="' + hh + '"></label></div>' +
       '<label class="campo">Local (opcional)<input name="local" maxlength="40" placeholder="Ex.: Salão" value="' + esc(e ? e.local : '') + '"></label>' +
-      '<label class="campo">Notas (opcional)<textarea name="notas" maxlength="300" placeholder="Ex.: 60 pessoas">' + esc(e ? e.notas : '') + '</textarea></label>' +
+      '<label class="campo">Descrição (opcional)<textarea name="notas" maxlength="300" placeholder="Ex.: Estudo bíblico, 60 pessoas">' + esc(e ? e.notas : '') + '</textarea></label>' +
       '<h2 class="secao">Artigos necessários</h2>' +
       '<div id="ev-itens" style="display:flex;flex-direction:column;gap:12px"></div>' +
       '<button class="btn secundario" type="button" data-acao="ev-add-item">+ Adicionar artigo</button>' +
